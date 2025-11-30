@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <title>THR0NE7 Coffee Run</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, sans-serif; }
+    body {
+      background: #111;
+      color: #fff;
+      overflow: hidden;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    #game-container {
+      position: relative;
+      width: 100vw;
+      max-width: 480px;
+      aspect-ratio: 9/16;
+      background: #000;
+      overflow: hidden;
+      border-radius: 16px;
+      box-shadow: 0 0 30px rgba(0,0,0,0.7);
+    }
+    canvas { width: 100%; height: 100%; display: block; background: #000 !important; }
+
+    .overlay {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      justify-content: center; align-items: center;
+      background: rgba(0,0,0,0.8);
+      z-index: 10; padding: 16px; text-align: center;
+    }
+    .hidden { display: none !important; }
+    .btn {
+      margin-top: 12px; padding: 10px 18px;
+      border-radius: 999px; border: none;
+      background: #ffcc00; color: #222;
+      font-weight: 700; cursor: pointer;
+    }
+    .btn:active { transform: scale(0.96); }
+    .small { font-size: 12px; opacity: 0.7; margin-top: 4px; }
+
+    #hud {
+      position: absolute; inset: 0;
+      display: flex; justify-content: space-between;
+      padding: 8px; pointer-events: none;
+      font-size: 12px; text-shadow: 0 0 4px #000;
+      z-index: 5;
+    }
+    #hud-right { text-align: right; }
+
+    #fill-bar { width: 90px; height: 6px; border-radius: 999px; border: 1px solid #fff6; margin-top: 2px; overflow: hidden; }
+    #fill-bar-inner { height: 100%; width: 0%; background: #ffcc00; transition: width .15s; }
+
+    #logo { position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%); z-index: 6; opacity: 0.9; }
+    #logo img { height: 32px; }
+
+    #touch-hints {
+      position: absolute; inset: 0;
+      display: flex; justify-content: space-between; align-items: end;
+      padding: 0 10px 30px;
+      pointer-events: none; opacity: 0.4; font-size: 10px;
+    }
+    #modes { display: flex; gap: 6px; margin-top: 8px; }
+    .mode-btn { padding: 8px 12px; border-radius: 999px; background:#444; color:#fff; border:none; }
+    .mode-btn.active { background:#ffcc00; color:#222; }
+  </style>
+</head>
+<body>
+  <div id="game-container">
+    <canvas id="game"></canvas>
+
+    <!-- HUD -->
+    <div id="hud">
+      <div>
+        <div>Время смены: <span id="time">0.0</span> c</div>
+        <div>Капель поймано: <span id="score">0</span></div>
+      </div>
+      <div id="hud-right">
+        <div>Проливов: <span id="misses">0</span></div>
+        <div>Рекорд: <span id="best-score">0</span></div>
+        <div style="margin-top:4px;">Наполненность:</div>
+        <div id="fill-bar"><div id="fill-bar-inner"></div></div>
+        <div id="fill-percent-text" style="font-size:10px; opacity:.7;">0%</div>
+      </div>
+    </div>
+
+    <!-- touch hints -->
+    <div id="touch-hints">
+      <div>👈 жми<br>чтобы двигать стакан</div>
+      <div style="text-align:right;">жми 👉<br>чтобы двигать стакан</div>
+    </div>
+
+    <!-- logo -->
+    <div id="logo">
+      <img src="assets/logo.png" alt="THR0NE7" />
+    </div>
+
+    <!-- loading -->
+    <div id="loading-screen" class="overlay">
+      <img src="assets/logo.png" style="height:64px; margin-bottom:18px;">
+      <h1>THR0NE7 COFFEE RUN</h1>
+      <p class="small" style="margin-top:8px;">Загрузка ресурсов...</p>
+    </div>
+
+    <!-- start -->
+    <div id="start-screen" class="overlay hidden">
+      <h2>THR0NE7 COFFEE RUN</h2>
+      <p style="margin-top:8px;">Лови капли кофе и не проливай!</p>
+
+      <div style="margin-top:12px;">
+        <div class="small">Режим:</div>
+        <div id="modes">
+          <button class="mode-btn active" data-mode="espresso">Эспрессо</button>
+          <button class="mode-btn" data-mode="latte">Латте</button>
+          <button class="mode-btn" data-mode="rush">Час-пик</button>
+        </div>
+      </div>
+
+      <button class="btn" id="start-btn" style="margin-top:16px;">Начать смену</button>
+    </div>
+
+    <!-- gameover -->
+    <div id="gameover-screen" class="overlay hidden">
+      <h2>Смена окончена</h2>
+      <p>Капель поймано: <span id="final-score">0</span></p>
+      <p>Проливов: <span id="final-misses">0</span></p>
+      <p>Лучший рекорд: <span id="final-best">0</span></p>
+
+      <button class="btn" id="restart-btn">Ещё одна смена</button>
+      <button class="btn" id="share-btn" style="margin-top:6px;">Поделиться</button>
+      <p id="share-hint" class="small"></p>
+    </div>
+
+  </div>
+
+<script>
+/* modes */
+const MODES={
+  espresso:{label:'Эспрессо',baseSpeed:170,spawnBase:1.0,capacity:25},
+  latte:{label:'Латте',baseSpeed:150,spawnBase:1.1,capacity:35},
+  rush:{label:'Час-пик',baseSpeed:190,spawnBase:0.8,capacity:45}
+};
+
+let currentModeKey='espresso';
+
+/* canvas */
+const canvas=document.getElementById('game');
+const ctx=canvas.getContext('2d');
+canvas.width=360; canvas.height=640;
+
+/* UI */
+const loadingScreen=document.getElementById('loading-screen');
+const startScreen=document.getElementById('start-screen');
+const gameoverScreen=document.getElementById('gameover-screen');
+
+const timeEl=document.getElementById('time');
+const scoreEl=document.getElementById('score');
+const missesEl=document.getElementById('misses');
+const bestScoreEl=document.getElementById('best-score');
+const finalScoreEl=document.getElementById('final-score');
+const finalMissesEl=document.getElementById('final-misses');
+const finalBestEl=document.getElementById('final-best');
+
+const fillBarInner=document.getElementById('fill-bar-inner');
+const fillPercentText=document.getElementById('fill-percent-text');
+const shareHint=document.getElementById('share-hint');
+
+/* buttons */
+document.getElementById('start-btn').onclick=startGame;
+document.getElementById('restart-btn').onclick=startGame;
+
+document.querySelectorAll('.mode-btn').forEach(b=>{
+  b.onclick=()=>{
+    document.querySelectorAll('.mode-btn').forEach(bb=>bb.classList.remove('active'));
+    b.classList.add('active');
+    currentModeKey=b.dataset.mode;
+  };
+});
+
+/* images (YOUR PNGs) */
+const imgCup=new Image(); imgCup.src='assets/cup.png';
+const imgDrop=new Image(); imgDrop.src='assets/drop.png';
+
+let assetsLoaded=0;
+imgCup.onload=imgDrop.onload=()=>{
+  assetsLoaded++;
+  if(assetsLoaded>=2) onReady();
+};
+
+function onReady(){
+  loadingScreen.classList.add('hidden');
+  startScreen.classList.remove('hidden');
+  bestScore=parseInt(localStorage.getItem('thr0ne7_best')||'0');
+  bestScoreEl.textContent=bestScore;
+}
+
+/* game vars */
+let bestScore=0;
+let gameState='menu';
+let lanes=[];
+let cup;
+let drops=[];
+let lastTS=0;
+let time=0,score=0,misses=0,level=1,spawnTimer=0,fill=0;
+
+/* init */
+function startGame(){
+  gameState='playing';
+  init();
+  startScreen.classList.add('hidden');
+  gameoverScreen.classList.add('hidden');
+  lastTS=performance.now();
+  requestAnimationFrame(loop);
+}
+
+function init(){
+  const mode=MODES[currentModeKey];
+  lanes=[60,180,300];
+
+  cup={x:150,y:530,width:60,height:90,target:1};
+  drops=[];
+  time=0;score=0;misses=0;level=1;spawnTimer=0;fill=0;
+
+  updateFill();
+  updateHUD();
+}
+
+function updateHUD(){
+  timeEl.textContent=time.toFixed(1);
+  scoreEl.textContent=score;
+  missesEl.textContent=misses;
+  bestScoreEl.textContent=bestScore;
+}
+
+function updateFill(){
+  const cap=MODES[currentModeKey].capacity;
+  const pct=Math.min(100,Math.round(fill/cap*100));
+  fillBarInner.style.width=pct+'%';
+  fillPercentText.textContent=pct+'%';
+}
+
+/* controls */
+document.addEventListener('keydown',e=>{
+  if(gameState!=='playing')return;
+  if(e.key==='ArrowLeft') cup.target=Math.max(0,cup.target-1);
+  if(e.key==='ArrowRight') cup.target=Math.min(2,cup.target+1);
+});
+
+document.getElementById('game-container').addEventListener('touchstart',e=>{
+  if(gameState!=='playing')return;
+  const x=e.touches[0].clientX - e.target.getBoundingClientRect().left;
+  if(x<canvas.width/2) cup.target=Math.max(0,cup.target-1);
+  else cup.target=Math.min(2,cup.target+1);
+});
+
+/* spawn */
+function spawnDrop(){
+  const lane=lanes[Math.floor(Math.random()*3)];
+  drops.push({x:lane-12,y:-30,width:24,height:32});
+}
+
+/* collisions */
+function caught(c,d){
+  const top=c.y+c.height*0.05;
+  const bot=c.y+c.height*0.4;
+  const v=(d.y+d.height>top)&&(d.y+d.height<bot);
+  const h=(d.x+d.width*0.6>c.x)&&(d.x+d.width*0.4<c.x+c.width);
+  return v&&h;
+}
+
+/* game loop */
+function loop(ts){
+  if(gameState!=='playing')return;
+  const dt=(ts-lastTS)/1000; lastTS=ts;
+
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+function update(dt){
+  const mode=MODES[currentModeKey];
+  time+=dt;
+  level=Math.min(8,1+Math.floor(score/10));
+
+  /* cup move */
+  const targetX=lanes[cup.target]-cup.width/2;
+  cup.x+= (targetX-cup.x)*Math.min(1,10*dt);
+
+  /* spawn */
+  spawnTimer+=dt;
+  const interval=Math.max(0.3,mode.spawnBase-(level-1)*0.08);
+  if(spawnTimer>=interval){ spawnTimer=0; spawnDrop(); }
+
+  /* drop fall */
+  const sp=mode.baseSpeed+(level-1)*35;
+  drops.forEach(d=>d.y+=sp*dt);
+
+  /* check drops */
+  const newDrops=[];
+  for(const d of drops){
+    if(d.y>canvas.height- d.height*0.3){ misses++; continue; }
+    if(caught(cup,d)){ score++; fill++; updateFill(); continue; }
+    newDrops.push(d);
+  }
+  drops=newDrops;
+
+  if(misses>=1){ endGame(); return; }
+
+  updateHUD();
+}
+
+/* render */
+function render(){
+  ctx.fillStyle='#000';
+  ctx.fillRect(0,0,360,640);
+
+  drops.forEach(d=>{
+    if(imgDrop.complete) ctx.drawImage(imgDrop,d.x,d.y,d.width,d.height);
+  });
+
+  if(imgCup.complete) ctx.drawImage(imgCup,cup.x,cup.y,cup.width,cup.height);
+}
+
+/* end */
+function endGame(){
+  gameState='gameover';
+  if(score>bestScore){
+    bestScore=score;
+    localStorage.setItem('thr0ne7_best',score);
+  }
+  finalScoreEl.textContent=score;
+  finalMissesEl.textContent=misses;
+  finalBestEl.textContent=bestScore;
+  gameoverScreen.classList.remove('hidden');
+}
+
+/* share */
+document.getElementById('share-btn').onclick=async()=>{
+  const text=`Я поймал ${score} капель в THR0NE7 Coffee Run!`;
+  if(navigator.share){
+    try{ await navigator.share({title:'THR0NE7 Coffee Run',text,url:location.href}); }
+    catch{}
+  } else shareHint.textContent='Отсутствует Web Share API';
+};
+</script>
+</body>
+</html>
